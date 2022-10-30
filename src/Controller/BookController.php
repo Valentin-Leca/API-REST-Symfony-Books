@@ -16,14 +16,26 @@ use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Serializer\Normalizer\AbstractNormalizer;
 use Symfony\Component\Serializer\SerializerInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
+use Symfony\Contracts\Cache\ItemInterface;
+use Symfony\Contracts\Cache\TagAwareCacheInterface;
 
 class BookController extends AbstractController {
 
     #[Route('/api/books', name: 'all_books', methods: ['GET'])]
-    public function getAllBooks(BookRepository $bookRepository, SerializerInterface $serializer): JsonResponse {
+    public function getAllBooks(BookRepository $bookRepository, SerializerInterface $serializer, Request $request,
+                                TagAwareCacheInterface $cache): JsonResponse {
 
-        $bookList = $bookRepository->findAll();
-        $jsonBookList = $serializer->serialize($bookList, 'json', ['groups' => 'getBooks']);
+        $page = $request->get('page', 1);
+        $limit = $request->get('limit', 10);
+
+        $idCache = "getAllBooks-" . $page . "-" . $limit;
+
+        $jsonBookList = $cache->get($idCache, function (ItemInterface $item) use ($bookRepository, $page, $limit, $serializer) {
+            echo ("L'élément n'est pas encore en cache !\n");
+            $item->tag('getAllBooksCache');
+            $bookList = $bookRepository->findAllWithPagination($page, $limit);
+            return $serializer->serialize($bookList, 'json', ['groups' => 'getBooks']);
+        });
 
         return new JsonResponse(
             $jsonBookList,
@@ -45,7 +57,9 @@ class BookController extends AbstractController {
     }
 
     #[Route('/api/books/{id}', name: 'delete_book', methods: ['DELETE'])]
-    public function deleteOneBook(Book $book, EntityManagerInterface $entityManager): JsonResponse {
+    public function deleteOneBook(Book $book, EntityManagerInterface $entityManager, TagAwareCacheInterface $cache): JsonResponse {
+
+        $cache->invalidateTags(['getAllBooksCache']);
 
         $entityManager->remove($book);
         $entityManager->flush();
